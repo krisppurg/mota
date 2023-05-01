@@ -226,7 +226,7 @@ proc messageCreate(s: Shard, m: Message) {.event(discord).} =
 
 waitFor discord.startSession(
     gateway_intents = {
-      giGuildEmojisAndStickers, giGuildBans,
+    #   giGuildBans, to be continued...
       giGuilds, giGuildMembers, giGuildMessages, giMessageContent
     }
 )
