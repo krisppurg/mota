@@ -1,3 +1,8 @@
 nimcache/
 nimblecache/
 htmldocs/
+main
+config.json
+run.sh
+fixedfile.sh
+test_config.json

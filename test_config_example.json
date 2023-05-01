@@ -1,0 +1,15 @@
+{
+    "token": "<nope>",
+    "657178484875067402": {
+        "webhook_id": "747158803325255700",
+        "webhook_token": "<webhook-token>"
+    },
+    "590880974867529733": {
+        "webhook_id": "747084105434398782",
+        "webhook_token": "<webhook-token>"
+    },
+    "api_guild": "81384788765712384",
+    "denied": [
+        "1234"
+    ]
+}

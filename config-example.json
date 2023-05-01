@@ -1,0 +1,16 @@
+
+{
+    "token": "<insert-token-here>",
+    "571359938501410828": {
+        "webhook_id": "747451759651192923",
+        "webhook_token": "<insert-webhook-token>"
+    },
+    "743302883327606885": {
+        "webhook_id": "747105202653626420",
+        "webhook_token": "<insert-webhook-token-for-discord-api-server>"
+    },
+    "api_guild": "81384788765712384",
+    "denied": [
+        "1234"
+    ]
+}
