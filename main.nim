@@ -16,7 +16,10 @@ let discord = newDiscordClient(
 )
 
 let
-    api_guild = "81384788765712384" # Discord API Guild
+    dapi_guild = "81384788765712384" # Discord API Guild
+    dimscord_guild = "571359938501410826" # Dimscord Guild
+    private = "657178484875067402" # private
+    testingwithothers = "590880974867529733" # testing-with-others
     r_danny = "80528701850124288" # Discord Bot
     dimscord_news = "743384158428069958" # News Role
     nim_dimscord = "743302883327606885" # From #nim_dimscord
@@ -29,42 +32,71 @@ let
         "<@699969981714006127>",
         "mota"
     ]
-var cached_messages = initTable[string, Message]()
+var cached_messages_sent = initTable[string, Message]()
+var cached_messages_recv = initTable[string, string]()
 
 randomize()
-proc purge(target: string, m: Message) {.async.} =
-    let ids = (await discord.api.getChannelMessages(
-        m.channel_id,
-        after = $(1 - int64 m.id.parseInt)
-    )).filterIt(it.author.id == m.author.id).mapIt(it.id)
 
-    var payload = ids.distribute(2)
-    if ids.distribute(2)[1].len <= 2:
-        payload = @[ids]
-
-    for msgs in payload:
-        await discord.api.bulkDeleteMessages(
-            target,
-            msgs
-        )
-proc onDispatch(s: Shard, event: string, data: JsonNode) {.event(discord).} =
-    var target = ""
-    case event:
-    of "MESSAGE_DELETE_BULK":
-        if %"657178484875067402" == data["channel_id"]:
-            target = "590880974867529733"
-        elif %"590880974867529733" == data["channel_id"]:
-            target = "657178484875067402"
+proc messageDeleteBulk(s: Shard, messages: seq[tuple[msg: Message, exists: bool]]) {.event(discord).} =
+    var channel = messages[0].msg.channel_id
+    when defined(relayTest):
+        if channel == dimscord_chan:
+            channel = nim_dimscord
+        elif channel == nim_dimscord:
+            channel = dimscord_chan
         else:
             return
-        
-        let channel = s.cache.guildChannels[data["channel_id"].str]
-
-        let ids = data["ids"].elems.mapIt(it.str)
-        if ids[0] in channel.messages:
-            await target.purge(channel.messages[ids[0]])
     else:
-        discard
+        if channel == private:
+            channel = testingwithothers
+        elif channel == testingwithothers:
+            channel = private
+        else:
+            return
+
+    var relayed = messages.filterIt(it.msg.id in cached_messages_sent).mapIt(cached_messages_sent[it.msg.id])
+    var unrelayed = messages.filterIt(it.msg.id notin cached_messages_sent)
+
+    if relayed.len == 1: 
+        cached_messages_recv.del(cached_messages_sent[relayed[0].id].id)
+        cached_messages_sent.del(relayed[0].id)
+        await discord.api.deleteWebhookMessage(
+            webhook_id = config[channel]["webhook_id"].str,
+            webhook_token = config[channel]["webhook_token"].str,
+            relayed[0].id
+        )
+    else:
+        if relayed.len != 0:
+            let ids = relayed.mapIt(it.id)
+            for id in ids:
+                cached_messages_recv.del cached_messages_sent[id].id
+                cached_messages_sent.del id
+
+            try:
+                await discord.api.bulkDeleteMessages(channel, ids)
+            except:
+                raise newException(Exception, getCurrentExceptionMsg())
+
+    if unrelayed.len != 0:
+        let ids = (await discord.api.getChannelMessages(
+            channel,
+            after = $(int64(unrelayed[0].msg.id.parseInt-7))
+        )).mapIt(it.id)
+
+        if ids.len == 0: return
+
+        if ids.len == 1:
+            await discord.api.deleteWebhookMessage(
+                webhook_id = config[channel]["webhook_id"].str,
+                webhook_token = config[channel]["webhook_token"].str,
+                ids[0]
+            )
+        return
+
+        try:
+            await discord.api.bulkDeleteMessages(channel, ids)
+        except:
+            raise newException(Exception, getCurrentExceptionMsg())
 
 
 proc onReady(s: Shard, e: Ready) {.event(discord).} =
@@ -92,36 +124,72 @@ proc messageUpdate(s: Shard, m: Message, o: Option[Message], exists: bool) {.eve
     if m.author.isNil: return
     if %m.author.id in config["denied"].elems: return
     var channel = ""
-    let dimscord_guild = "571359938501410826" # Dimscord Guild
  
     when not defined(relayTest):
-        if m.guild_id.get == "571359938501410826":
-            if m.channel_id != dimscord_chan:
-                return
+        if m.guild_id.get == dimscord_guild:
+            if m.channel_id != dimscord_chan: return
             channel = nim_dimscord
-        elif m.guild_id.get == "81384788765712384":
-            if m.channel_id != nim_dimscord:
-                return
+        elif m.guild_id.get == dapi_guild:
+            if m.channel_id != nim_dimscord: return
             channel = dimscord_chan
         else:
             return
     else:
-        if m.channel_id == "657178484875067402": # private
-            channel = "590880974867529733"
-        elif m.channel_id == "590880974867529733": # testing-with-others
-            channel = "657178484875067402"
+        if m.channel_id == private: # private
+            channel = testingwithothers
+        elif m.channel_id == testingwithothers: # testing with others
+            channel = private
 
-    if m.content != "" and m.id in cached_messages:
-        let msg = cached_messages[m.id]
+    if m.content != "" and m.id in cached_messages_sent:
+        let msg = cached_messages_sent[m.id]
         if msg.webhook_id.isSome:
             discard await discord.api.editWebhookMessage(
                 webhook_id = config[channel]["webhook_id"].str,
                 webhook_token = config[channel]["webhook_token"].str,
-                cached_messages[m.id].id,
+                cached_messages_sent[m.id].id,
                 content = some m.content
             )
+    else:
+        return
+
+proc messageDelete(s: Shard, m: Message, exists: bool) {.event(discord).} =
+    if m.author.isNil: return
+    if %m.author.id in config["denied"].elems: return
+    var
+        channel = ""
+        target = ""
+
+ 
+    when not defined(relayTest):
+        if m.guild_id.get == dimscord_guild:
+            if m.channel_id != dimscord_chan: return
+            channel = nim_dimscord
+        elif m.guild_id.get == dapi_guild:
+            if m.channel_id != nim_dimscord: return
+            channel = dimscord_chan
         else:
-            discard await discord.api.editMessage(channel, cached_messages[m.id].id, "From **" & $m.author & "**:\n" & m.content)
+            return
+    else:
+        if m.channel_id == private: # private
+            channel = testingwithothers
+        elif m.channel_id == testingwithothers: # testing-with-others
+            channel = private
+
+    if m.content != "":
+        if m.id in cached_messages_sent:
+            target = cached_messages_sent[m.id].id
+            cached_messages_recv.del(target) # webhook relayed msg
+            cached_messages_sent.del(m.id)
+            await discord.api.deleteWebhookMessage(
+                webhook_id = config[channel]["webhook_id"].str,
+                webhook_token = config[channel]["webhook_token"].str,
+                target
+            )
+        if m.id in cached_messages_recv:
+            target = cached_messages_recv[m.id]
+            cached_messages_sent.del(target)
+            cached_messages_recv.del(m.id)
+            await discord.api.deleteMessage(channel, target)
     else:
         return
 
@@ -143,13 +211,15 @@ proc relay(s: Shard, m: Message) {.async.} =
 
     var
         username = $m.author
-        channel, content = ""
+        channel = ""
         attachments: seq[Attachment] = @[]
 
     var avatar = m.author.avatarUrl
-    var dimscord_guild = "571359938501410826" # Dimscord Guild
+
+    if m.author.discriminator == "0": username = m.author.username
+
     when not defined(relayTest):
-        if m.guild_id.get == "571359938501410826":
+        if m.guild_id.get == dimscord_guild:
             if m.channel_id != dimscord_chan:
                 return
 
@@ -165,10 +235,10 @@ proc relay(s: Shard, m: Message) {.async.} =
         else:
             return
     else:
-        if m.channel_id == "657178484875067402": # private
-            channel = "590880974867529733"
-        elif m.channel_id == "590880974867529733": # testing-with-others
-            channel = "657178484875067402"
+        if m.channel_id == private: # private
+            channel = testingwithothers
+        elif m.channel_id == testingwithothers: # testing-with-others
+            channel = private
 
     if m.attachments.len > 0:
         for i, a in m.attachments:
@@ -183,24 +253,8 @@ proc relay(s: Shard, m: Message) {.async.} =
                 at.description = some a.description.get
             attachments &= at
 
-        # let prefix = "From **" & $m.author & "**:\n"
-        # content = m.content
-
-        # if prefix.len + content.len > 2000:
-        #     content = content[0..2000]
-
-        # cached_messages[m.id] = await discord.api.sendMessage(
-        #     channel,
-        #     prefix & content,
-        #     attachments = attachments,
-        #     allowed_mentions = some AllowedMentions(
-        #         parse: @["users"]
-        #     )
-        # )
-        # return
-
     if (m.content == "" and not m.attachments.len > 0) or channel == "": return
-    cached_messages[m.id] = get(await discord.api.executeWebhook(
+    cached_messages_sent[m.id] = get(await discord.api.executeWebhook(
         config[channel]["webhook_id"].str,
         config[channel]["webhook_token"].str,
         username = some username,
@@ -211,6 +265,7 @@ proc relay(s: Shard, m: Message) {.async.} =
             parse: @["users"]
         ),
     ))
+    cached_messages_recv[cached_messages_sent[m.id].id] = m.id
 
 proc messageCreate(s: Shard, m: Message) {.event(discord).} =
     await s.relay(m)
