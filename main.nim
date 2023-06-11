@@ -175,23 +175,22 @@ proc messageDelete(s: Shard, m: Message, exists: bool) {.event(discord).} =
         elif m.channel_id == testingwithothers: # testing-with-others
             channel = private
 
-    if m.content != "":
-        if m.id in cached_messages_sent:
-            target = cached_messages_sent[m.id].id
-            cached_messages_recv.del(target) # webhook relayed msg
-            cached_messages_sent.del(m.id)
-            await discord.api.deleteWebhookMessage(
-                webhook_id = config[channel]["webhook_id"].str,
-                webhook_token = config[channel]["webhook_token"].str,
-                target
-            )
-        if m.id in cached_messages_recv:
-            target = cached_messages_recv[m.id]
-            cached_messages_sent.del(target)
-            cached_messages_recv.del(m.id)
-            await discord.api.deleteMessage(channel, target)
-    else:
-        return
+    if m.id in cached_messages_sent:
+        target = cached_messages_sent[m.id].id
+        cached_messages_recv.del(target) # webhook relayed msg
+        cached_messages_sent.del(m.id)
+        await discord.api.deleteWebhookMessage(
+            webhook_id = config[channel]["webhook_id"].str,
+            webhook_token = config[channel]["webhook_token"].str,
+            target
+        )
+
+    if m.id in cached_messages_recv:
+        target = cached_messages_recv[m.id]
+        cached_messages_sent.del(target)
+        cached_messages_recv.del(m.id)
+        await discord.api.deleteMessage(channel, target)
+
 
 proc relay(s: Shard, m: Message) {.async.} =
     if m.author.id == r_danny and dimscord_news in m.mention_roles:
