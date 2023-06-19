@@ -92,5 +92,21 @@ proc handleUtil*(s: Shard, m: Message;
 
         discard await discord.api.sendMessage(
             m.channel_id, user.avatarUrl("png", size = 256))
+    of "defaultavatar":
+        var
+            id = m.author.id
+            user = m.author
+
+        if args.len > 2:
+            id = args[2]
+            if id notin s.cache.users:
+                try:
+                    user = await discord.api.getUser(id)
+                except:
+                    discard await discord.api.sendMessage(
+                        m.channel_id, "Invalid user.")
+
+        discard await discord.api.sendMessage(
+            m.channel_id, user.defaultAvatarUrl())
     else:
         discard
