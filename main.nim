@@ -1,4 +1,4 @@
-import dimscord
+import dimscord, dimscmd
 
 import json, asyncdispatch, random, strutils
 import tables, options, sequtils, httpclient
@@ -10,10 +10,9 @@ when defined(relayTest):
     config = readFile("test_config.json").parseJson
 else:
     config = readFile("config.json").parseJson
-let discord = newDiscordClient(
-    config["token"].str,
-    rest_version = 10
-)
+
+let discord = newDiscordClient(config["token"].str, rest_version = 10)
+var cmd = discord.newHandler(msgVariable="m")
 
 let
     dapi_guild = "81384788765712384" # Discord API Guild
@@ -37,7 +36,11 @@ var cached_messages_recv = initTable[string, string]()
 
 randomize()
 
-proc messageDeleteBulk(s: Shard, messages: seq[tuple[msg: Message, exists: bool]]) {.event(discord).} =
+proc messageDeleteBulk(
+    s: Shard, messages: seq[tuple[
+        msg: Message, exists: bool
+]]) {.event(discord).} =
+    ## code is a bit incomplete but will get to work on it.
     var channel = messages[0].msg.channel_id
     when defined(relayTest):
         if channel == dimscord_chan:
@@ -54,7 +57,8 @@ proc messageDeleteBulk(s: Shard, messages: seq[tuple[msg: Message, exists: bool]
         else:
             return
 
-    var relayed = messages.filterIt(it.msg.id in cached_messages_sent).mapIt(cached_messages_sent[it.msg.id])
+    var relayed = messages.filterIt(it.msg.id in cached_messages_sent).mapIt(
+        cached_messages_sent[it.msg.id])
     var unrelayed = messages.filterIt(it.msg.id notin cached_messages_sent)
 
     if relayed.len == 1: 
@@ -98,29 +102,23 @@ proc messageDeleteBulk(s: Shard, messages: seq[tuple[msg: Message, exists: bool]
         except:
             raise newException(Exception, getCurrentExceptionMsg())
 
-
 proc onReady(s: Shard, e: Ready) {.event(discord).} =
     echo "Mota is ready."
+
     await s.updateStatus(activity = some ActivityStatus(
         name: "mota help",
         kind: atListening
     ))
 
-proc handleCommands(s: Shard, m: Message;
-                    args: seq[string], command: string;
-                    channel: GuildChannel) {.async.} =
-    case command.toLowerAscii():
-    of "help":
-        discard await discord.api.sendMessage(
-            m.channel_id,
-            "Commands are `ping, pin, info, purge, poop, nopoop, typing, msginfo, guildinfo, status, avatar`"
-        )
-    else:
-        asyncCheck s.handleMod(m, args, command, channel)
-        await s.handleUtil(m, args, command, channel)
-        return
+proc handleCommands(s: Shard, m: Message) {.async.} =
+    discard await cmd.handleMessage(@acceptable_prefixes, s, m)
 
-proc messageUpdate(s: Shard, m: Message, o: Option[Message], exists: bool) {.event(discord).} =
+proc messageUpdate(
+        s: Shard;
+        m: Message, o: Option[Message];
+        exists: bool
+) {.event(discord).} =
+
     if m.author.isNil: return
     if %m.author.id in config["denied"].elems: return
     var channel = ""
@@ -158,7 +156,6 @@ proc messageDelete(s: Shard, m: Message, exists: bool) {.event(discord).} =
     var
         channel = ""
         target = ""
-
  
     when not defined(relayTest):
         if m.guild_id.get == dimscord_guild:
@@ -199,6 +196,7 @@ proc relay(s: Shard, m: Message) {.async.} =
             "From Discord API (#nim_dimscord): \n\n" &
             m.stripMentions.replace("@" & dimscord_news, "News")
         )
+
     if m.webhook_id.isSome or m.author.bot: return
     when defined(relayTest):
         config = readFile("test_config.json").parseJson
@@ -271,16 +269,16 @@ proc messageCreate(s: Shard, m: Message) {.event(discord).} =
 
     let args = m.content.split(" ")
     if m.author.bot or args[0] notin acceptable_prefixes: return
+    await s.handleCommands(m)
 
-    let
-        command = args[1]
-        channel = s.cache.guildChannels[m.channel_id]
-
-    await s.handleCommands(m, args, command, channel)
+discord.handleMod(cmd)
+discord.handleUtil(cmd)
 
 waitFor discord.startSession(
     gateway_intents = {
     #   giGuildBans, to be continued...
-      giGuilds, giGuildMembers, giGuildMessages, giMessageContent
+      giMessageContent,
+      giGuilds, giGuildMembers, giGuildMessages,
+      giGuildMessageReactions # needed for the poop command
     }
 )
